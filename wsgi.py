@@ -1,4 +1,4 @@
-from payement import app  # Importer l'application FastAPI
+from main import app  # Importer l'application FastAPI
 import uvicorn
 
 if __name__ == "__main__":
