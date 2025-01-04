@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Accueil - Webhook Dashboard{% endblock %}
+
+{% block content %}
+<form action="/clear-history" method="post">
+    <button type="submit">Effacer l'historique</button>
+</form>
+<table>
+    <thead>
+        <tr>
+            <th>Type</th>
+            <th>ID Client</th>
+            <th>Montant</th>
+            <th>Status</th>
+            <th>Reçu à</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for event in webhook_history %}
+        <tr>
+            <td>{{ event.type }}</td>
+            <td>{{ event.data.customer_id }}</td>
+            <td>{{ event.data.amount }}</td>
+            <td>{{ event.data.status }}</td>
+            <td>{{ event.received_at }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
