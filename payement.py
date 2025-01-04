@@ -9,6 +9,8 @@ import time
 from datetime import datetime
 import os
 from dotenv import load_dotenv
+import threading
+import uvicorn
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -41,41 +43,76 @@ if 'webhook_history' not in st.session_state:
     st.session_state.webhook_history = []
 
 # Interface Streamlit
-st.set_page_config(
-    page_title="Chargily Pay Dashboard",
-    page_icon="💰",
-    layout="wide"
-)
+def streamlit_interface():
+    # Configuration de la page Streamlit
+    st.set_page_config(
+        page_title="Chargily Pay Dashboard",
+        page_icon="💰",
+        layout="wide"
+    )
 
-st.title("📊 Chargily Pay Dashboard")
+    st.title("📊 Chargily Pay Dashboard")
 
-# Afficher les statistiques dans des colonnes
-col1, col2, col3 = st.columns(3)
+    # Afficher les statistiques dans des colonnes
+    col1, col2, col3 = st.columns(3)
 
-# Calcul des statistiques
-total_payments = len([x for x in st.session_state.webhook_history if x['type'] == 'checkout.paid'])
-total_amount = sum([x['data']['amount'] for x in st.session_state.webhook_history if x['type'] == 'checkout.paid'])
-failed_payments = len([x for x in st.session_state.webhook_history if x['type'] == 'checkout.failed'])
+    # Calcul des statistiques
+    total_payments = len([x for x in st.session_state.webhook_history if x['type'] == 'checkout.paid'])
+    total_amount = sum([x['data']['amount'] for x in st.session_state.webhook_history if x['type'] == 'checkout.paid'])
+    failed_payments = len([x for x in st.session_state.webhook_history if x['type'] == 'checkout.failed'])
 
-with col1:
-    st.metric("Paiements Réussis", total_payments)
-with col2:
-    st.metric("Montant Total (DZD)", f"{total_amount:,}")
-with col3:
-    st.metric("Paiements Échoués", failed_payments)
+    with col1:
+        st.metric("Paiements Réussis", total_payments)
+    with col2:
+        st.metric("Montant Total (DZD)", f"{total_amount:,}")
+    with col3:
+        st.metric("Paiements Échoués", failed_payments)
+
+    # Afficher l'historique des webhooks
+    st.header("📝 Historique des Webhooks")
+
+    # Filtres
+    col1, col2 = st.columns(2)
+    with col1:
+        filter_type = st.selectbox(
+            "Filtrer par type",
+            options=["Tous", "checkout.paid", "checkout.failed"]
+        )
+
+    with col2:
+        search_customer = st.text_input("Rechercher par ID client")
+
+    # Appliquer les filtres
+    filtered_history = st.session_state.webhook_history
+
+    if filter_type != "Tous":
+        filtered_history = [x for x in filtered_history if x['type'] == filter_type]
+
+    if search_customer:
+        filtered_history = [x for x in filtered_history if search_customer.lower() in x['data']['customer_id'].lower()]
+
+    # Afficher les événements filtrés
+    for event in filtered_history:
+        with st.expander(f"{event['type']} - {event['data']['customer_id']} - {event['received_at']}"):
+            st.json(event)
+
+    # Bouton pour effacer l'historique
+    if st.button("Effacer l'historique"):
+        st.session_state.webhook_history = []
+        st.experimental_rerun()
 
 # Fonction de vérification de signature
 def verify_signature(payload: str, signature: str) -> bool:
     """Vérifie la signature du webhook."""
     if not signature:
         return False
-    
+
     computed_signature = hmac.new(
         CHARGILY_SECRET.encode('utf-8'),
         payload.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
-    
+
     return hmac.compare_digest(signature, computed_signature)
 
 # Endpoint FastAPI pour le webhook
@@ -84,64 +121,37 @@ async def webhook_handler(request: Request):
     try:
         # Extraire la signature
         signature = request.headers.get('signature')
-        
+
         # Récupérer le payload brut
         payload_bytes = await request.body()
         payload_str = payload_bytes.decode('utf-8')
         payload = json.loads(payload_str)
-        
+
         # Vérifier la signature
         if not verify_signature(payload_str, signature):
             raise HTTPException(status_code=403, detail="Invalid signature")
-        
+
         # Valider le payload avec Pydantic
         event = WebhookEvent(**payload)
-        
+
         # Ajouter l'événement à l'historique avec un timestamp
         webhook_data = {
             **payload,
             'received_at': datetime.now().isoformat()
         }
         st.session_state.webhook_history.insert(0, webhook_data)
-        
+
         return {"status": "success"}
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# Afficher l'historique des webhooks
-st.header("📝 Historique des Webhooks")
-
-# Filtres
-col1, col2 = st.columns(2)
-with col1:
-    filter_type = st.selectbox(
-        "Filtrer par type",
-        options=["Tous", "checkout.paid", "checkout.failed"]
-    )
-
-with col2:
-    search_customer = st.text_input("Rechercher par ID client")
-
-# Appliquer les filtres
-filtered_history = st.session_state.webhook_history
-
-if filter_type != "Tous":
-    filtered_history = [x for x in filtered_history if x['type'] == filter_type]
-
-if search_customer:
-    filtered_history = [x for x in filtered_history if search_customer.lower() in x['data']['customer_id'].lower()]
-
-# Afficher les événements filtrés
-for event in filtered_history:
-    with st.expander(f"{event['type']} - {event['data']['customer_id']} - {event['received_at']}"):
-        st.json(event)
-
-# Bouton pour effacer l'historique
-if st.button("Effacer l'historique"):
-    st.session_state.webhook_history = []
-    st.experimental_rerun()
+# Lancer Streamlit en parallèle avec FastAPI
+def start_streamlit():
+    import os
+    os.system("streamlit run app.py")
 
 if __name__ == "__main__":
-    import uvicorn
+    # Lancer FastAPI avec uvicorn
+    threading.Thread(target=start_streamlit).start()
     uvicorn.run(app, host="0.0.0.0", port=8000)
